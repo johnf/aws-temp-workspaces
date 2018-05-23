@@ -1,0 +1,184 @@
+#!/bin/bash
+
+set -e
+
+export AWS_DEFAULT_OUTPUT=json
+
+. config
+
+if [ -z $AWS_REGION ]; then
+  AWS_REGION=$(aws configure get region)
+fi
+export AWS_REGION
+
+# We just choose the first VPC we find if one isn't defined
+if [ -z $VPC_ID ]; then
+  VPC_ID=$(aws ec2 describe-vpcs | jq -r .Vpcs[0].VpcId)
+fi
+
+SUBNET_FILTER=$(cat <<EOF
+  [
+    {
+      "Name": "vpc-id",
+      "Values": [ "$VPC_ID" ]
+    }
+  ]
+EOF
+)
+
+# Assume if A isn't defined none of them are
+if [ -z $SUBNET_IDS ]; then
+  SUBNET_IDS=$(aws  ec2 describe-subnets --filters "$SUBNET_FILTER" | jq  -r '[.Subnets | .[] | .SubnetId][0:2]')
+else
+  SUBNET_IDS="[\"$(echo $SUBNET_IDS | sed 's/,/","/')\"]"
+fi
+
+VPC_SETTINGS=$(cat <<EOF
+  {
+    "VpcId": "$VPC_ID",
+    "SubnetIds": $SUBNET_IDS
+  }
+EOF
+)
+
+DIRECTORY_ID=$(aws ds create-directory \
+  --name $DOMAIN \
+  --password $PASSWORD \
+  --size Small \
+  --vpc-settings "$VPC_SETTINGS" \
+  | jq -r .DirectoryId
+)
+
+sleep 10
+
+DIRECTORY_DNS=$(aws ds describe-directories \
+  --directory-ids $DIRECTORY_ID \
+  | jq -r .DirectoryDescriptions[0].DnsIpAddrs[0]
+)
+
+URL="https://${AWS_REGION}.console.aws.amazon.com/workspaces/home?region=${AWS_REGION}#directories:directories"
+
+gio open $URL
+echo "You need to register the directory with workspaces, it should open in your browser shortly"
+echo "Hit enter when done"
+
+read
+
+AMI_FILTER=$(cat <<EOF
+ [
+   {
+     "Name": "name",
+     "Values": [
+       "ubuntu/images/hvm-ssd/ubuntu-bionic-18.04-amd64-server-*"
+    ]
+  }
+]
+EOF
+)
+
+UBUNTU_AMI=$(aws ec2 describe-images \
+    --owners 099720109477 \
+    --filters "$AMI_FILTER" \
+    | jq -r '.Images | sort_by(.CreationDate) | .[-1] | .ImageId'
+)
+SUBNET_ID=$(echo $SUBNET_IDS | jq -r .[0])
+
+B64_PASS=$(echo -n "\"$PASSWORD\"" | iconv --to utf-16le | base64)
+USER_DATA=$(cat <<EOF
+#cloud-config
+repo_update: true
+repo_upgrade: all
+
+packages:
+ - ldap-utils
+write_files:
+  - content: |
+      # $USERNAME, Users, corp.inodes.org
+      dn: CN=$USERNAME,CN=Users,DC=corp,DC=inodes,DC=org
+      objectClass: top
+      objectClass: person
+      objectClass: organizationalPerson
+      objectClass: user
+      cn: $USERNAME
+      sn: $LASTNAME
+      givenName: $FIRSTNAME
+      instanceType: 4
+      name: $USERNAME
+      userAccountControl: 512
+      sAMAccountName: $USERNAME
+      # sAMAccountType: 805306368
+      userPrincipalName: $USERNAME@corp.inodes.org
+      objectCategory: CN=Person,CN=Schema,CN=Configuration,DC=corp,DC=inodes,DC=org
+      mail: $EMAIL
+      distinguishedName: CN=$USERNAME,CN=Users,DC=corp,DC=inodes,DC=org
+      unicodePwd:: $B64_PASS
+    path: /tmp/$USERNAME.ldif
+
+runcmd:
+  - echo "nameserver $DIRECTORY_DNS" > /etc/resolv.conf
+  - echo MOO
+  - ldapadd -h $DOMAIN -p 389 -D "cn=administrator,cn=Users,dc=$(echo $DOMAIN | sed 's/\./,dc=/g')" -w "$PASSWORD" -f /tmp/$USERNAME.ldif 2>&1
+  - echo $?
+  - echo COW
+
+power_state:
+  mode: poweroff
+  message: Bye Bye
+  timeout: 30
+  condition: True
+EOF
+)
+
+# TODO Remove the key
+INSTANCE_ID=$(aws ec2 run-instances \
+  --image-id $UBUNTU_AMI \
+  --instance-type t2.micro \
+  --subnet-id $SUBNET_ID \
+  --instance-initiated-shutdown-behavior terminate \
+  --user-data "$USER_DATA" \
+  --key-name johnf2 --security-group-ids sg-0c861296ba074a3c5 \
+  | jq -r .Instances[0].InstanceId
+)
+
+sleep 5
+
+echo -n 'Waiting for user to be created'
+while [ $(aws ec2 describe-instances --instance-ids $INSTANCE_ID | jq -r '.Reservations[0].Instances[0].State.Name') != 'terminated' ]; do
+  sleep 5
+  echo -n .
+done
+
+if [ -z $BUNDLE_ID ]; then
+  BUNDLE_ID=$(aws workspaces describe-workspace-bundles \
+    --owner AMAZON \
+    | jq -r '.Bundles | .[] | select(.Name == "Value with Windows 10") | .BundleId'
+  )
+fi
+
+WORKSPACE=$(cat <<EOF
+  [
+    {
+      "DirectoryId": "$DIRECTORY_ID",
+      "UserName": "$USERNAME",
+      "BundleId": "$BUNDLE_ID"
+    }
+  ]
+EOF
+)
+
+echo -n 'Creating workspace...'
+aws workspaces create-workspaces \
+  --workspaces "$WORKSPACE"
+echo ' Done.'
+
+echo -n 'Waiting for workspace to be ready'
+while aws workspaces describe-workspaces | jq -r '.Workspaces | .[] | .State' | grep -qi pending; do
+  echo -n .
+  sleep 5
+done
+
+
+REG_KEY=$(aws workspaces describe-workspace-directories \
+  | jq -r '.Directories | .[] | .RegistrationCode')
+
+echo "Registration key for your workspace is $REG_KEY"

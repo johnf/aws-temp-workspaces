@@ -1,0 +1,24 @@
+# The domain you want for your workspace, not really important what it is
+DOMAIN=corp.inodes.org
+
+# Username for windows login
+USERNAME=johnf
+# Domain as well as user password
+PASSWORD=betofo8aek7X
+
+# Some details for the directory
+FIRSTNAME=John
+LASTNAME=Ferlito
+EMAIL=johnf@XXXXX
+
+# Optional uses Value with Windows 10 by default
+BUNDLE_ID=wsb-ZZZZZ
+
+# This is optional, it will pick random VPC by default
+# VPC_ID=XXXXX
+# This is optional, will pick random two from the VPC by default
+# SUBNET_IDS=subnet-AAA,subnet-BBB
+
+# These are optional but can be handy to specify
+# AWS_REGION=ap-southeast-2
+# AWS_PROFILE=xxxx

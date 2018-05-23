@@ -1,0 +1,46 @@
+#!/bin/bash
+
+set -e
+
+export AWS_DEFAULT_OUTPUT=json
+
+. config
+
+if [ -z $AWS_REGION ]; then
+  AWS_REGION=$(aws configure get region)
+fi
+export AWS_REGION
+
+# We just choose the first VPC we find if one isn't defined
+if [ -z $VPC_ID ]; then
+  VPC_ID=$(aws ec2 describe-vpcs | jq -r .Vpcs[0].VpcId)
+fi
+
+WORKSPACE_IDS=$(aws workspaces describe-workspaces \
+  | jq '[.Workspaces | .[] | { WorkspaceId: .WorkspaceId } ]'
+)
+
+aws workspaces terminate-workspaces --terminate-workspace-requests "$WORKSPACE_IDS"
+
+echo -n 'Waiting for workspace to terminate'
+while [ "$(aws workspaces describe-workspaces | jq '[.Workspaces | .[] | { WorkspaceId: .WorkspaceId } ]')" != "[]" ]; do
+  echo -n .
+  sleep 5
+done
+echo ' Done.'
+
+echo
+URL="https://${AWS_REGION}.console.aws.amazon.com/workspaces/home?region=${AWS_REGION}#directories:directories"
+gio open $URL
+echo "You need to unregister the directory with workspaces, it should open in your browser shortly"
+echo "Hit enter when done"
+
+read
+
+DIRECTORY_IDS=$(aws ds describe-directories \
+  | jq -r '.DirectoryDescriptions | .[] | .DirectoryId'
+)
+
+for ID in $DIRECTORY_IDS; do
+  aws ds delete-directory --directory-id $ID
+done
