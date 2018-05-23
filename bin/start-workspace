@@ -1,18 +1,18 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
-set -e
+set -o errexit
 
 export AWS_DEFAULT_OUTPUT=json
 
-. config
+. ./etc/config
 
-if [ -z $AWS_REGION ]; then
+if [ -z "$AWS_REGION" ]; then
   AWS_REGION=$(aws configure get region)
 fi
 export AWS_REGION
 
 # We just choose the first VPC we find if one isn't defined
-if [ -z $VPC_ID ]; then
+if [ -z "$VPC_ID" ]; then
   VPC_ID=$(aws ec2 describe-vpcs | jq -r .Vpcs[0].VpcId)
 fi
 
@@ -27,7 +27,7 @@ EOF
 )
 
 # Assume if A isn't defined none of them are
-if [ -z $SUBNET_IDS ]; then
+if [ -z "$SUBNET_IDS" ]; then
   SUBNET_IDS=$(aws  ec2 describe-subnets --filters "$SUBNET_FILTER" | jq  -r '[.Subnets | .[] | .SubnetId][0:2]')
 else
   SUBNET_IDS="[\"$(echo $SUBNET_IDS | sed 's/,/","/')\"]"
@@ -42,8 +42,8 @@ EOF
 )
 
 DIRECTORY_ID=$(aws ds create-directory \
-  --name $DOMAIN \
-  --password $PASSWORD \
+  --name "$DOMAIN" \
+  --password "$PASSWORD" \
   --size Small \
   --vpc-settings "$VPC_SETTINGS" \
   | jq -r .DirectoryId
@@ -52,17 +52,17 @@ DIRECTORY_ID=$(aws ds create-directory \
 sleep 10
 
 DIRECTORY_DNS=$(aws ds describe-directories \
-  --directory-ids $DIRECTORY_ID \
+  --directory-ids "$DIRECTORY_ID" \
   | jq -r .DirectoryDescriptions[0].DnsIpAddrs[0]
 )
 
 URL="https://${AWS_REGION}.console.aws.amazon.com/workspaces/home?region=${AWS_REGION}#directories:directories"
 
-gio open $URL
+open "$URL"
 echo "You need to register the directory with workspaces, it should open in your browser shortly"
 echo "Hit enter when done"
 
-read
+read -r
 
 AMI_FILTER=$(cat <<EOF
  [
@@ -81,7 +81,15 @@ UBUNTU_AMI=$(aws ec2 describe-images \
     --filters "$AMI_FILTER" \
     | jq -r '.Images | sort_by(.CreationDate) | .[-1] | .ImageId'
 )
-SUBNET_ID=$(echo $SUBNET_IDS | jq -r .[0])
+SUBNET_ID=$(echo "$SUBNET_IDS" | jq -r .[0])
+
+DOMAIN_OBJECT=""
+
+while IFS='.' read -ra DOM; do
+  for i in "${DOM[@]}"; do
+    DOMAIN_OBJECT="$DOMAIN_OBJECT,DC=$i"
+  done
+done <<< "$DOMAIN"
 
 B64_PASS=$(echo -n "\"$PASSWORD\"" | iconv --to utf-16le | base64)
 USER_DATA=$(cat <<EOF
@@ -93,8 +101,8 @@ packages:
  - ldap-utils
 write_files:
   - content: |
-      # $USERNAME, Users, corp.inodes.org
-      dn: CN=$USERNAME,CN=Users,DC=corp,DC=inodes,DC=org
+      # $USERNAME, Users, $DOMAIN
+      dn: CN=$USERNAME,CN=Users$DOMAIN_OBJECT
       objectClass: top
       objectClass: person
       objectClass: organizationalPerson
@@ -107,15 +115,18 @@ write_files:
       userAccountControl: 512
       sAMAccountName: $USERNAME
       # sAMAccountType: 805306368
-      userPrincipalName: $USERNAME@corp.inodes.org
-      objectCategory: CN=Person,CN=Schema,CN=Configuration,DC=corp,DC=inodes,DC=org
+      userPrincipalName: $USERNAME@$DOMAIN
+      objectCategory: CN=Person,CN=Schema,CN=Configuration$DOMAIN_OBJECT
       mail: $EMAIL
-      distinguishedName: CN=$USERNAME,CN=Users,DC=corp,DC=inodes,DC=org
+      distinguishedName: CN=$USERNAME,CN=Users$DOMAIN_OBJECT
       unicodePwd:: $B64_PASS
     path: /tmp/$USERNAME.ldif
 
 runcmd:
   - echo "nameserver $DIRECTORY_DNS" > /etc/resolv.conf
+  - cat /etc/resolv.conf
+  - echo "sleeping 20, to let things settle"
+  - sleep 20
   - echo MOO
   - ldapadd -h $DOMAIN -p 389 -D "cn=administrator,cn=Users,dc=$(echo $DOMAIN | sed 's/\./,dc=/g')" -w "$PASSWORD" -f /tmp/$USERNAME.ldif 2>&1
   - echo $?
@@ -129,26 +140,29 @@ power_state:
 EOF
 )
 
+SECGROUP_ID=$(aws ec2 describe-security-groups --filters Name=vpc-id,Values="$VPC_ID" Name=group-name,Values=default | jq -r .SecurityGroups[0].GroupId)
+
 # TODO Remove the key
 INSTANCE_ID=$(aws ec2 run-instances \
-  --image-id $UBUNTU_AMI \
+  --image-id "$UBUNTU_AMI" \
   --instance-type t2.micro \
-  --subnet-id $SUBNET_ID \
+  --subnet-id "$SUBNET_ID" \
   --instance-initiated-shutdown-behavior terminate \
   --user-data "$USER_DATA" \
-  --key-name johnf2 --security-group-ids sg-0c861296ba074a3c5 \
+  --security-group-ids "${SECGROUP_ID}"\
   | jq -r .Instances[0].InstanceId
 )
 
 sleep 5
 
 echo -n 'Waiting for user to be created'
-while [ $(aws ec2 describe-instances --instance-ids $INSTANCE_ID | jq -r '.Reservations[0].Instances[0].State.Name') != 'terminated' ]; do
+while [ $(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" | jq -r '.Reservations[0].Instances[0].State.Name') != 'terminated' ]; do
   sleep 5
   echo -n .
 done
+echo ' Done.'
 
-if [ -z $BUNDLE_ID ]; then
+if [ -z "$BUNDLE_ID" ]; then
   BUNDLE_ID=$(aws workspaces describe-workspace-bundles \
     --owner AMAZON \
     | jq -r '.Bundles | .[] | select(.Name == "Value with Windows 10") | .BundleId'
@@ -176,6 +190,7 @@ while aws workspaces describe-workspaces | jq -r '.Workspaces | .[] | .State' | 
   echo -n .
   sleep 5
 done
+echo ' Done.'
 
 
 REG_KEY=$(aws workspaces describe-workspace-directories \
