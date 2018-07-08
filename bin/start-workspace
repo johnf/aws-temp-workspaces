@@ -209,7 +209,7 @@ aws workspaces create-workspaces \
 echo ' Done.'
 
 echo -n 'Waiting for workspace to be ready'
-while aws workspaces describe-workspaces | jq -r '.Workspaces | .[] | .State' | grep -qi pending; do
+while [ $(aws workspaces describe-workspaces | jq -r '.Workspaces | .[] | .State') == 'PENDING' ]; do
   echo -n .
   sleep 5
 done
