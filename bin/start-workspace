@@ -11,7 +11,10 @@ if [ -z "$AWS_REGION" ]; then
 fi
 export AWS_REGION
 
+export AWS_PROFILE
+
 # We just choose the first VPC we find if one isn't defined
+echo Fetching VPC...
 if [ -z "$VPC_ID" ]; then
   VPC_ID=$(aws ec2 describe-vpcs | jq -r .Vpcs[0].VpcId)
 fi
@@ -27,6 +30,7 @@ EOF
 )
 
 # Assume if A isn't defined none of them are
+echo Fetching subnets...
 if [ -z "$SUBNET_IDS" ]; then
   SUBNET_IDS=$(aws  ec2 describe-subnets --filters "$SUBNET_FILTER" | jq  -r '[.Subnets | .[] | .SubnetId][0:2]')
 else
@@ -41,6 +45,8 @@ VPC_SETTINGS=$(cat <<EOF
 EOF
 )
 
+echo Creating directory...
+
 DIRECTORY_ID=$(aws ds create-directory \
   --name "$DOMAIN" \
   --password "$PASSWORD" \
@@ -50,6 +56,8 @@ DIRECTORY_ID=$(aws ds create-directory \
 )
 
 sleep 10
+
+echo Fetching Directory...
 
 DIRECTORY_DNS=$(aws ds describe-directories \
   --directory-ids "$DIRECTORY_ID" \
@@ -75,6 +83,8 @@ AMI_FILTER=$(cat <<EOF
 ]
 EOF
 )
+
+echo Fetching AMI...
 
 UBUNTU_AMI=$(aws ec2 describe-images \
     --owners 099720109477 \
@@ -140,9 +150,11 @@ power_state:
 EOF
 )
 
+echo Fetching Security Group...
+
 SECGROUP_ID=$(aws ec2 describe-security-groups --filters Name=vpc-id,Values="$VPC_ID" Name=group-name,Values=default | jq -r .SecurityGroups[0].GroupId)
 
-# TODO Remove the key
+echo Creatinf EC2 Instance...
 INSTANCE_ID=$(aws ec2 run-instances \
   --image-id "$UBUNTU_AMI" \
   --instance-type t2.micro \
