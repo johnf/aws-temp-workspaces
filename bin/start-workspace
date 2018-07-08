@@ -64,6 +64,13 @@ DIRECTORY_DNS=$(aws ds describe-directories \
   | jq -r .DirectoryDescriptions[0].DnsIpAddrs[0]
 )
 
+echo -n 'Waiting for directory to be ready'
+while [ $(aws ds describe-directories --directory-ids "$DIRECTORY_ID" | jq -r '.DirectoryDescriptions[0].Stage') != 'Active' ]; do
+  sleep 5
+  echo -n .
+done
+echo ' Done.'
+
 URL="https://${AWS_REGION}.console.aws.amazon.com/workspaces/home?region=${AWS_REGION}#directories:directories"
 
 open "$URL"
