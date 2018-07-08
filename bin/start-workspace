@@ -82,7 +82,7 @@ esac
 echo "You need to register the directory with workspaces, it should open in your browser shortly"
 echo "Hit enter when done"
 
-read -r
+read -r dummy
 
 AMI_FILTER=$(cat <<EOF
  [
