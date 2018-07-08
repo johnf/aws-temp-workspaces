@@ -145,14 +145,13 @@ write_files:
     path: /tmp/$USERNAME.ldif
 
 runcmd:
+  - echo "RUN: Setting name server to $DIRECTORY_DNS"
   - echo "nameserver $DIRECTORY_DNS" > /etc/resolv.conf
-  - cat /etc/resolv.conf
-  - echo "sleeping 20, to let things settle"
+  - echo "RUN: sleeping 20, to let things settle"
   - sleep 20
-  - echo MOO
-  - ldapadd -h $DOMAIN -p 389 -D "cn=administrator,cn=Users,dc=$(echo $DOMAIN | sed 's/\./,dc=/g')" -w "$PASSWORD" -f /tmp/$USERNAME.ldif 2>&1
-  - echo $?
-  - echo COW
+  - echo "RUN: Adding $USERNAME to $DOMAIN"
+  - ldapadd -v -h $DOMAIN -p 389 -D "cn=administrator,cn=Users,dc=$(echo $DOMAIN | sed 's/\./,dc=/g')" -w "$PASSWORD" -f /tmp/$USERNAME.ldif 2>&1
+  - echo "RUN: Exist Status was $?"
 
 power_state:
   mode: poweroff
@@ -166,7 +165,7 @@ echo Fetching Security Group...
 
 SECGROUP_ID=$(aws ec2 describe-security-groups --filters Name=vpc-id,Values="$VPC_ID" Name=group-name,Values=default | jq -r .SecurityGroups[0].GroupId)
 
-echo Creatinf EC2 Instance...
+echo Creating EC2 Instance...
 INSTANCE_ID=$(aws ec2 run-instances \
   --image-id "$UBUNTU_AMI" \
   --instance-type t2.micro \
