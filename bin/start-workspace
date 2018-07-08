@@ -73,7 +73,12 @@ echo ' Done.'
 
 URL="https://${AWS_REGION}.console.aws.amazon.com/workspaces/home?region=${AWS_REGION}#directories:directories"
 
-open "$URL"
+case "$OSTYPE" in
+  darwin*) open "$URL" > /dev/null ;;
+  *)       xdg-open "$URL" > /dev/null ;;
+esac
+
+
 echo "You need to register the directory with workspaces, it should open in your browser shortly"
 echo "Hit enter when done"
 
