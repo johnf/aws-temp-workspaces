@@ -145,13 +145,13 @@ write_files:
     path: /tmp/$USERNAME.ldif
 
 runcmd:
-  - echo "RUN: Setting name server to $DIRECTORY_DNS"
+  - echo "RUN - Setting name server to $DIRECTORY_DNS"
   - echo "nameserver $DIRECTORY_DNS" > /etc/resolv.conf
-  - echo "RUN: sleeping 20, to let things settle"
+  - echo "RUN - sleeping 20, to let things settle"
   - sleep 20
-  - echo "RUN: Adding $USERNAME to $DOMAIN"
+  - echo "RUN - Adding $USERNAME to $DOMAIN"
   - ldapadd -v -h $DOMAIN -p 389 -D "cn=administrator,cn=Users,dc=$(echo $DOMAIN | sed 's/\./,dc=/g')" -w "$PASSWORD" -f /tmp/$USERNAME.ldif 2>&1
-  - echo "RUN: Exist Status was $?"
+  - echo "RUN - Exist Status was $?"
 
 power_state:
   mode: poweroff

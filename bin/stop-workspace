@@ -22,7 +22,9 @@ WORKSPACE_IDS=$(aws workspaces describe-workspaces \
   | jq '[.Workspaces | .[] | { WorkspaceId: .WorkspaceId } ]'
 )
 
-aws workspaces terminate-workspaces --terminate-workspace-requests "$WORKSPACE_IDS"
+if [ "$WORKSPACE_IDS" != "[]" ]; then
+  aws workspaces terminate-workspaces --terminate-workspace-requests "$WORKSPACE_IDS"
+fi
 
 echo -n 'Waiting for workspace to terminate'
 while [ "$(aws workspaces describe-workspaces | jq '[.Workspaces | .[] | { WorkspaceId: .WorkspaceId } ]')" != "[]" ]; do
