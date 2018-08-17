@@ -21,11 +21,11 @@ See the sample config for docs.
 Start the workspace up
 
 ``` bash
-bin/start-workspace
+bin/workspace start
 ```
 
 When you are done, kill it
 
 ``` bash
-bin/stop-workspace
+bin/workspace stop
 ```
